@@ -6,7 +6,7 @@ import sqlite3
 exchange = ccxt.kucoin()
 
 class ArbitrageStrategy:
-    def __init__(self, trading_pairs=None, min_profit_threshold=0.01, trade_amount=100.0, execution_interval=60):
+    def __init__(self, trading_pairs=None, min_profit_threshold=0.01, trade_amount=100.0, execution_interval=60, output_callback=None):
         """
         Initialize arbitrage strategy with parameters
         
@@ -15,18 +15,26 @@ class ArbitrageStrategy:
             min_profit_threshold (float): Minimum price difference (in %) to execute trade
             trade_amount (float): Amount in USDT to trade
             execution_interval (int): How often to check for arbitrage opportunities (in seconds)
+            output_callback (function): Callback function to handle output messages
         """
         self.trading_pairs = trading_pairs or ["BTC/USDT", "ETH/USDT"]
         self.min_profit_threshold = min_profit_threshold  # 1% minimum profit
         self.trade_amount = trade_amount
         self.execution_interval = execution_interval
         self.is_running = False
+        self.output_callback = output_callback
         print("Initializing ArbitrageStrategy...")  # Debugging statement
         # Connect to the SQLite database
         self.conn = sqlite3.connect('trading_data.db')
         self.cursor = self.conn.cursor()
         self.data_fetched = False  # Flag to indicate if data has been fetched
         print("Database connection established.")  # Debugging statement
+
+    def log(self, message):
+        """Helper method to handle output"""
+        print(message)  # Still print to console
+        if self.output_callback:
+            self.output_callback(message)  # Send to UI
 
     def fetch_and_save_data(self):
         print("Fetching and saving data...")  # Debugging statement
@@ -115,30 +123,28 @@ class ArbitrageStrategy:
         self.is_running = True
         while self.is_running:
             try:
-                print(f"\nChecking prices for pairs: {self.trading_pairs}")
+                self.log(f"\nChecking prices for pairs: {self.trading_pairs}")
                 for pair in self.trading_pairs:
                     try:
                         ticker = exchange.fetch_ticker(pair)
-                        print(f"{pair}: Bid: {ticker['bid']}, Ask: {ticker['ask']}")
+                        self.log(f"{pair}: Bid: {ticker['bid']}, Ask: {ticker['ask']}")
                         
                         # Calculate potential profit
                         spread = (ticker['bid'] - ticker['ask']) / ticker['ask'] * 100
-                        print(f"Current spread for {pair}: {spread:.2f}%")
+                        self.log(f"Current spread for {pair}: {spread:.2f}%")
                         
                         if spread > self.min_profit_threshold:
-                            print(f"Profitable opportunity found! Spread: {spread:.2f}%")
-                            # Here you would implement the actual trading logic
-                            # For now, we'll just simulate it
+                            self.log(f"Profitable opportunity found! Spread: {spread:.2f}%")
                             potential_profit = self.trade_amount * (spread / 100)
-                            print(f"Potential profit: {potential_profit:.2f} USDT")
+                            self.log(f"Potential profit: {potential_profit:.2f} USDT")
                     except Exception as e:
-                        print(f"Error checking {pair}: {str(e)}")
+                        self.log(f"Error checking {pair}: {str(e)}")
                 
-                print(f"Waiting {self.execution_interval} seconds before next check...")
+                self.log(f"Waiting {self.execution_interval} seconds before next check...")
                 time.sleep(self.execution_interval)
                 
             except Exception as e:
-                print(f"Error in arbitrage execution: {str(e)}")
+                self.log(f"Error in arbitrage execution: {str(e)}")
                 time.sleep(5)  # Wait a bit before retrying
 
     def stop(self):

@@ -93,20 +93,29 @@ class StrategyManagement(QWidget):
                 trade_amount = float(parameters[2].strip()) if len(parameters) > 2 else 100.0
                 execution_interval = int(parameters[3].strip()) if len(parameters) > 3 else 60
 
+                def update_output(message):
+                    self.arbitrage_output.append(message)
+                    # Scroll to the bottom
+                    self.arbitrage_output.verticalScrollBar().setValue(
+                        self.arbitrage_output.verticalScrollBar().maximum()
+                    )
+
                 self.strategy = ArbitrageStrategy(
                     trading_pairs=trading_pairs,
                     min_profit_threshold=min_profit_threshold,
                     trade_amount=trade_amount,
-                    execution_interval=execution_interval
+                    execution_interval=execution_interval,
+                    output_callback=update_output
                 )
-                print(f"Arbitrage strategy initialized with parameters:")
-                print(f"Trading pairs: {trading_pairs}")
-                print(f"Min profit threshold: {min_profit_threshold}")
-                print(f"Trade amount: {trade_amount}")
-                print(f"Execution interval: {execution_interval}")
+                
+                update_output("Arbitrage strategy initialized with parameters:")
+                update_output(f"Trading pairs: {trading_pairs}")
+                update_output(f"Min profit threshold: {min_profit_threshold}")
+                update_output(f"Trade amount: {trade_amount}")
+                update_output(f"Execution interval: {execution_interval}")
                 
                 threading.Thread(target=self.strategy.execute, daemon=True).start()
-                print("Starting Arbitrage strategy...")
+                update_output("Starting Arbitrage strategy...")
             except Exception as e:
                 print(f"Error initializing arbitrage strategy: {e}")
                 self.arbitrage_output.append(f"Error: {str(e)}")
