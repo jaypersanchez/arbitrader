@@ -1,5 +1,9 @@
 import sys
 import os
+
+# Add the arbitrader directory to the Python path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget,
     QVBoxLayout, QPushButton, QLabel, QTableWidget,
@@ -9,6 +13,7 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 import ccxt
 from dotenv import load_dotenv
 from tabulate import tabulate
+from modules.strategy_management import StrategyManagement  # Import your StrategyManagement class
 
 # Load environment variables
 load_dotenv()
@@ -47,32 +52,28 @@ class BalanceFetcher(QThread):
 class TradingApp(QMainWindow):
     def __init__(self):
         super().__init__()
-
-        # Set the window title
         self.setWindowTitle("AI Trading Agent")
-
-        # Maximize window based on screen size
         self.setGeometry(0, 0, QApplication.primaryScreen().geometry().width(),
                          QApplication.primaryScreen().geometry().height())
 
-        # Add Menu Bar for additional functionality
+        # Create central widget and main layout
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.main_layout = QVBoxLayout(self.central_widget)
+
+        # Add Menu Bar
         self.menu_bar = self.menuBar()
         self.add_menu_actions()
 
-        # Tab Widget
-        self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
-
-        # Start fetching balances on startup
+        # Add balance display
         self.loading_label = QLabel("Loading balances, please wait...")
         self.loading_label.setAlignment(Qt.AlignCenter)
-        self.tabs.addTab(self.loading_label, "Loading")
+        self.main_layout.addWidget(self.loading_label)
         self.fetch_balances()
 
-        # Add other tabs after fetching balances
-        self.tabs.addTab(self.create_strategy_management_tab(), "Strategy Management")
-        self.tabs.addTab(self.create_backtesting_tab(), "Backtesting")
-        self.tabs.addTab(self.create_risk_management_tab(), "Risk Management")
+        # Add Strategy Management
+        self.strategy_management = StrategyManagement()
+        self.main_layout.addWidget(self.strategy_management)
 
     def add_menu_actions(self):
         # File Menu
@@ -105,91 +106,36 @@ class TradingApp(QMainWindow):
         self.thread.start()
 
     def display_balances(self, balances):
-        # Remove loading label and display balances
-        self.tabs.removeTab(self.tabs.indexOf(self.loading_label))
+        # Remove loading label
+        self.loading_label.setParent(None)
 
-        # Prepare data for table
-        table_data = [["Account Type", "USDT Balance"]] + [[account_type.capitalize() + " Account", balances[account_type]] for account_type in ['main', 'trading', 'margin', 'futures']]
-
-        # Create a new tab for displaying balances
-        balance_tab = QWidget()
-        layout = QVBoxLayout()
-        account_table = QTableWidget(len(table_data), 2)
+        # Create balance display widget
+        balance_widget = QWidget()
+        balance_layout = QVBoxLayout()
+        
+        # Create and setup table
+        account_table = QTableWidget(4, 2)
         account_table.setHorizontalHeaderLabels(["Account Type", "USDT Balance"])
+        
+        for i, (account_type, balance) in enumerate([
+            ('Main', balances['main']),
+            ('Trading', balances['trading']),
+            ('Margin', balances['margin']),
+            ('Futures', balances['futures'])
+        ]):
+            account_table.setItem(i, 0, QTableWidgetItem(f"{account_type} Account"))
+            account_table.setItem(i, 1, QTableWidgetItem(f"{balance:.2f}"))
 
-        for i, (account_type, usdt_balance) in enumerate(table_data[1:]):  # Skip header
-            account_table.setItem(i, 0, QTableWidgetItem(account_type))
-            account_table.setItem(i, 1, QTableWidgetItem(f"{usdt_balance:.2f}"))
-
-        layout.addWidget(account_table)
-        balance_tab.setLayout(layout)
-
-        self.tabs.addTab(balance_tab, "Account Overview")
-        self.tabs.setCurrentWidget(balance_tab)
+        balance_layout.addWidget(account_table)
+        balance_widget.setLayout(balance_layout)
+        
+        # Add to main layout
+        self.main_layout.insertWidget(0, balance_widget)
 
     def close_app(self):
         # Gracefully close the application
         print("Exiting application...")
         self.close()
-
-    def create_strategy_management_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout()
-
-        layout.addWidget(QLabel("Select Strategy"))
-        self.strategy_combo = QComboBox()
-        self.strategy_combo.addItems(["Arbitrage", "Market Making", "Momentum-Based"])
-        layout.addWidget(self.strategy_combo)
-
-        layout.addWidget(QLabel("Parameters"))
-        self.param_input = QLineEdit()
-        layout.addWidget(self.param_input)
-
-        start_button = QPushButton("Start Strategy")
-        layout.addWidget(start_button)
-
-        tab.setLayout(layout)
-        return tab
-
-    def create_backtesting_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout()
-
-        layout.addWidget(QLabel("Select Pair for Backtesting"))
-        self.pair_input = QLineEdit()
-        layout.addWidget(self.pair_input)
-
-        layout.addWidget(QLabel("Select Date Range"))
-        self.date_range_input = QLineEdit()
-        layout.addWidget(self.date_range_input)
-
-        run_button = QPushButton("Run Backtesting")
-        layout.addWidget(run_button)
-
-        tab.setLayout(layout)
-        return tab
-
-    def create_risk_management_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout()
-
-        layout.addWidget(QLabel("Set Maximum Trade Size (%)"))
-        self.trade_size_input = QLineEdit()
-        layout.addWidget(self.trade_size_input)
-
-        layout.addWidget(QLabel("Enable Stop-Loss (Optional)"))
-        self.stop_loss_input = QLineEdit()
-        layout.addWidget(self.stop_loss_input)
-
-        layout.addWidget(QLabel("Enable Take-Profit (Optional)"))
-        self.take_profit_input = QLineEdit()
-        layout.addWidget(self.take_profit_input)
-
-        save_button = QPushButton("Save Risk Settings")
-        layout.addWidget(save_button)
-
-        tab.setLayout(layout)
-        return tab
 
 
 if __name__ == "__main__":
