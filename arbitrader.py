@@ -1,17 +1,48 @@
 import sys
+import os
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget,
     QVBoxLayout, QPushButton, QLabel, QTableWidget,
     QTableWidgetItem, QLineEdit, QComboBox, QHBoxLayout, QMenuBar, QAction
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 import ccxt
-import os
 from dotenv import load_dotenv
 from tabulate import tabulate
 
 # Load environment variables
 load_dotenv()
+
+class BalanceFetcher(QThread):
+    update_balances = pyqtSignal(dict)
+
+    def run(self):
+        # Initialize KuCoin Exchange
+        api_key = os.getenv("KUCOIN_API_KEY")
+        api_secret = os.getenv("KUCOIN_SECRET_KEY")
+        api_passphrase = os.getenv("KUCOIN_PASSPHRASE")
+
+        exchange = ccxt.kucoin({
+            'apiKey': api_key,
+            'secret': api_secret,
+            'password': api_passphrase,
+            'enableRateLimit': True,
+        })
+
+        # Fetch balances for all accounts
+        account_types = ['main', 'trading', 'margin', 'futures']
+        balances = {}
+
+        for account_type in account_types:
+            try:
+                balance = exchange.fetch_balance(params={'type': account_type})
+                usdt_balance = balance['total'].get('USDT', 0)
+                balances[account_type] = usdt_balance
+            except Exception as e:
+                print(f"An error occurred while fetching {account_type} balance: {str(e)}")
+                balances[account_type] = 0
+
+        self.update_balances.emit(balances)
 
 class TradingApp(QMainWindow):
     def __init__(self):
@@ -32,8 +63,13 @@ class TradingApp(QMainWindow):
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
 
-        # Add Tabs
-        self.tabs.addTab(self.create_account_overview_tab(), "Account Overview")
+        # Start fetching balances on startup
+        self.loading_label = QLabel("Loading balances, please wait...")
+        self.loading_label.setAlignment(Qt.AlignCenter)
+        self.tabs.addTab(self.loading_label, "Loading")
+        self.fetch_balances()
+
+        # Add other tabs after fetching balances
         self.tabs.addTab(self.create_strategy_management_tab(), "Strategy Management")
         self.tabs.addTab(self.create_backtesting_tab(), "Backtesting")
         self.tabs.addTab(self.create_risk_management_tab(), "Risk Management")
@@ -63,77 +99,38 @@ class TradingApp(QMainWindow):
         maximize_action.triggered.connect(self.showMaximized)
         window_menu.addAction(maximize_action)
 
+    def fetch_balances(self):
+        self.thread = BalanceFetcher()
+        self.thread.update_balances.connect(self.display_balances)
+        self.thread.start()
+
+    def display_balances(self, balances):
+        # Remove loading label and display balances
+        self.tabs.removeTab(self.tabs.indexOf(self.loading_label))
+
+        # Prepare data for table
+        table_data = [["Account Type", "USDT Balance"]] + [[account_type.capitalize() + " Account", balances[account_type]] for account_type in ['main', 'trading', 'margin', 'futures']]
+
+        # Create a new tab for displaying balances
+        balance_tab = QWidget()
+        layout = QVBoxLayout()
+        account_table = QTableWidget(len(table_data), 2)
+        account_table.setHorizontalHeaderLabels(["Account Type", "USDT Balance"])
+
+        for i, (account_type, usdt_balance) in enumerate(table_data[1:]):  # Skip header
+            account_table.setItem(i, 0, QTableWidgetItem(account_type))
+            account_table.setItem(i, 1, QTableWidgetItem(f"{usdt_balance:.2f}"))
+
+        layout.addWidget(account_table)
+        balance_tab.setLayout(layout)
+
+        self.tabs.addTab(balance_tab, "Account Overview")
+        self.tabs.setCurrentWidget(balance_tab)
+
     def close_app(self):
         # Gracefully close the application
         print("Exiting application...")
         self.close()
-
-    def create_account_overview_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout()
-
-        # Account Overview Table
-        self.account_table = QTableWidget(0, 2)
-        self.account_table.setHorizontalHeaderLabels(["Account Type", "USDT Balance"])
-        layout.addWidget(QLabel("Account Balances"))
-        layout.addWidget(self.account_table)
-
-        # Refresh Button
-        refresh_button = QPushButton("Refresh Balances")
-        refresh_button.clicked.connect(self.refresh_account_balances)
-        layout.addWidget(refresh_button)
-
-        tab.setLayout(layout)
-        return tab
-
-    def refresh_account_balances(self):
-        try:
-            # Fetch API Credentials from environment variables
-            api_key = os.getenv("KUCOIN_API_KEY")
-            api_secret = os.getenv("KUCOIN_SECRET_KEY")
-            api_passphrase = os.getenv("KUCOIN_PASSPHRASE")
-
-            # Initialize KuCoin Exchange
-            exchange = ccxt.kucoin({
-                'apiKey': api_key,
-                'secret': api_secret,
-                'password': api_passphrase,
-                'enableRateLimit': True,
-            })
-
-            # Fetch balances for all accounts
-            account_types = ['main', 'trading', 'margin', 'futures']
-            balances = {}
-
-            for account_type in account_types:
-                try:
-                    # Check if the account type is supported before fetching
-                    if account_type == 'margin' and not margin_enabled:  # Replace with your logic to check if margin is enabled
-                        print("Margin trading is not enabled.")
-                        balances[account_type] = 0
-                        continue
-                    
-                    balance = exchange.fetch_balance(params={'type': account_type})
-                    usdt_balance = balance['total'].get('USDT', 0)  # Get USDT balance, default to 0 if not found
-                    balances[account_type] = usdt_balance  # Store the USDT balance
-                except Exception as e:
-                    print(f"An error occurred while fetching {account_type} balance: {str(e)}")
-                    balances[account_type] = 0  # Default to 0 if there's an error
-
-            # Prepare data for table, including all balances
-            table_data = [["Account Type", "USDT Balance"]] + [[account_type.capitalize() + " Account", balances[account_type]] for account_type in account_types]
-
-            # Print balances in table format
-            print(tabulate(table_data, headers="firstrow", tablefmt="grid"))
-
-            # Update the table with dynamic data
-            self.account_table.setRowCount(len(balances))
-            for i, (account_type, usdt_balance) in enumerate(balances.items()):
-                self.account_table.setItem(i, 0, QTableWidgetItem(account_type.capitalize()))
-                self.account_table.setItem(i, 1, QTableWidgetItem(f"{usdt_balance:.2f}"))
-
-        except Exception as e:
-            print(f"An error occurred while refreshing balances: {e}")
 
     def create_strategy_management_tab(self):
         tab = QWidget()
